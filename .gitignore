@@ -1,0 +1,19 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables / secrets
+.env
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Node (for later, when we add the mobile app)
+node_modules/
