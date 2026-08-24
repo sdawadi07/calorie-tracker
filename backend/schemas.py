@@ -1,6 +1,16 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class FoodBase(BaseModel):

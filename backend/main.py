@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import auth
 import models
 import schemas
 from database import Base, engine, get_db
@@ -24,6 +25,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/auth/signup", response_model=schemas.TokenOut)
+def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.email == user.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    db_user = models.User(email=user.email, hashed_password=auth.hash_password(user.password))
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return {"access_token": auth.create_access_token(db_user.id)}
+
+
+@app.post("/auth/login", response_model=schemas.TokenOut)
+def login(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if not db_user or not auth.verify_password(user.password, db_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return {"access_token": auth.create_access_token(db_user.id)}
+
 
 # DEMO_KEY works out of the box but is rate-limited (30 req/hour, 50/day).
 # Get a free personal key at https://api.data.gov/signup/ and set USDA_API_KEY
@@ -94,11 +116,15 @@ def list_foods(db: Session = Depends(get_db)):
 
 
 @app.post("/log/", response_model=schemas.LogEntryOut)
-def create_log_entry(entry: schemas.LogEntryCreate, db: Session = Depends(get_db)):
+def create_log_entry(
+    entry: schemas.LogEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     food = db.query(models.Food).filter(models.Food.id == entry.food_id).first()
     if not food:
         raise HTTPException(status_code=404, detail="Food not found")
-    db_entry = models.LogEntry(food_id=entry.food_id, grams=entry.grams)
+    db_entry = models.LogEntry(food_id=entry.food_id, grams=entry.grams, user_id=current_user.id)
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
@@ -106,14 +132,18 @@ def create_log_entry(entry: schemas.LogEntryCreate, db: Session = Depends(get_db
 
 
 @app.post("/log/quick", response_model=schemas.LogEntryOut)
-def create_quick_log_entry(entry: schemas.QuickLogCreate, db: Session = Depends(get_db)):
+def create_quick_log_entry(
+    entry: schemas.QuickLogCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     """Log food by name + total calories, without tracking per-100g/grams separately."""
     db_food = models.Food(name=entry.name, calories_per_100g=entry.calories)
     db.add(db_food)
     db.commit()
     db.refresh(db_food)
 
-    db_entry = models.LogEntry(food_id=db_food.id, grams=100)
+    db_entry = models.LogEntry(food_id=db_food.id, grams=100, user_id=current_user.id)
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
@@ -121,7 +151,11 @@ def create_quick_log_entry(entry: schemas.QuickLogCreate, db: Session = Depends(
 
 
 @app.post("/log/from_search", response_model=schemas.LogEntryOut)
-def create_log_entry_from_search(entry: schemas.LogFromSearchCreate, db: Session = Depends(get_db)):
+def create_log_entry_from_search(
+    entry: schemas.LogFromSearchCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     db_food = models.Food(
         name=entry.name,
         calories_per_100g=entry.calories_per_100g,
@@ -133,7 +167,7 @@ def create_log_entry_from_search(entry: schemas.LogFromSearchCreate, db: Session
     db.commit()
     db.refresh(db_food)
 
-    db_entry = models.LogEntry(food_id=db_food.id, grams=entry.grams)
+    db_entry = models.LogEntry(food_id=db_food.id, grams=entry.grams, user_id=current_user.id)
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
@@ -141,8 +175,16 @@ def create_log_entry_from_search(entry: schemas.LogFromSearchCreate, db: Session
 
 
 @app.delete("/log/{entry_id}", status_code=204)
-def delete_log_entry(entry_id: int, db: Session = Depends(get_db)):
-    db_entry = db.query(models.LogEntry).filter(models.LogEntry.id == entry_id).first()
+def delete_log_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    db_entry = (
+        db.query(models.LogEntry)
+        .filter(models.LogEntry.id == entry_id, models.LogEntry.user_id == current_user.id)
+        .first()
+    )
     if not db_entry:
         raise HTTPException(status_code=404, detail="Log entry not found")
     db.delete(db_entry)
@@ -150,21 +192,33 @@ def delete_log_entry(entry_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/log/today", response_model=list[schemas.LogEntryOut])
-def get_today_log(db: Session = Depends(get_db)):
+def get_today_log(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     today = datetime.utcnow().date()
     return (
         db.query(models.LogEntry)
-        .filter(func.date(models.LogEntry.logged_at) == today)
+        .filter(
+            models.LogEntry.user_id == current_user.id,
+            func.date(models.LogEntry.logged_at) == today,
+        )
         .all()
     )
 
 
 @app.get("/log/today/total")
-def get_today_total(db: Session = Depends(get_db)):
+def get_today_total(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     today = datetime.utcnow().date()
     entries = (
         db.query(models.LogEntry)
-        .filter(func.date(models.LogEntry.logged_at) == today)
+        .filter(
+            models.LogEntry.user_id == current_user.id,
+            func.date(models.LogEntry.logged_at) == today,
+        )
         .all()
     )
     total = sum(e.food.calories_per_100g * e.grams / 100 for e in entries)
@@ -172,8 +226,12 @@ def get_today_total(db: Session = Depends(get_db)):
 
 
 @app.post("/weight/", response_model=schemas.WeightEntryOut)
-def log_weight(entry: schemas.WeightEntryCreate, db: Session = Depends(get_db)):
-    db_entry = models.WeightEntry(weight_kg=entry.weight_kg)
+def log_weight(
+    entry: schemas.WeightEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    db_entry = models.WeightEntry(weight_kg=entry.weight_kg, user_id=current_user.id)
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
@@ -181,9 +239,13 @@ def log_weight(entry: schemas.WeightEntryCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/weight/", response_model=list[schemas.WeightEntryOut])
-def list_weight(db: Session = Depends(get_db)):
+def list_weight(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
     return (
         db.query(models.WeightEntry)
+        .filter(models.WeightEntry.user_id == current_user.id)
         .order_by(models.WeightEntry.recorded_at.desc())
         .all()
     )

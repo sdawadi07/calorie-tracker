@@ -11,10 +11,17 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Your laptop's LAN IP so a phone on the same WiFi can reach the backend.
 // Update this if your IP changes (e.g. after reconnecting to WiFi).
 const API_BASE_URL = 'http://10.1.10.112:8000';
+const TOKEN_KEY = 'calorie_tracker_token';
+
+const authHeaders = (token: string) => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${token}`,
+});
 
 type FoodEntry = {
   id: number;
@@ -36,7 +43,70 @@ type WeightEntry = {
   recorded_at: string;
 };
 
-function FoodLogScreen() {
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!email.trim() || !password) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body?.detail || 'Something went wrong.');
+        return;
+      }
+      onAuthenticated(body.access_token);
+    } catch (e) {
+      setError('Could not reach the server. Is the backend running?');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={styles.authContainer}>
+      <Text style={styles.title}>{mode === 'login' ? 'Log in' : 'Sign up'}</Text>
+      {error && <Text style={styles.error}>{error}</Text>}
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
+      <TouchableOpacity style={styles.button} onPress={submit} disabled={submitting}>
+        <Text style={styles.buttonText}>
+          {submitting ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Sign up'}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+        <Text style={styles.link}>
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function FoodLogScreen({ token, onUnauthorized }: { token: string; onUnauthorized: () => void }) {
   const [entries, setEntries] = useState<FoodEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +125,8 @@ function FoodLogScreen() {
 
   const loadTodaysLog = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/log/today`);
+      const res = await fetch(`${API_BASE_URL}/log/today`, { headers: authHeaders(token) });
+      if (res.status === 401) return onUnauthorized();
       const data = await res.json();
       setEntries(
         data.map((e: any) => ({
@@ -104,9 +175,10 @@ function FoodLogScreen() {
     try {
       const res = await fetch(`${API_BASE_URL}/log/from_search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(token),
         body: JSON.stringify({ ...selected, grams: parsedGrams }),
       });
+      if (res.status === 401) return onUnauthorized();
       const saved = await res.json();
       setEntries((prev) => [
         ...prev,
@@ -128,9 +200,10 @@ function FoodLogScreen() {
     try {
       const res = await fetch(`${API_BASE_URL}/log/quick`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(token),
         body: JSON.stringify({ name: manualName.trim(), calories: parsedCalories }),
       });
+      if (res.status === 401) return onUnauthorized();
       const saved = await res.json();
       setEntries((prev) => [
         ...prev,
@@ -148,7 +221,8 @@ function FoodLogScreen() {
   const removeEntry = async (id: number) => {
     setEntries((prev) => prev.filter((entry) => entry.id !== id));
     try {
-      await fetch(`${API_BASE_URL}/log/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE_URL}/log/${id}`, { method: 'DELETE', headers: authHeaders(token) });
+      if (res.status === 401) return onUnauthorized();
     } catch (e) {
       setError('Could not delete on the server.');
     }
@@ -255,7 +329,7 @@ function FoodLogScreen() {
   );
 }
 
-function WeightScreen() {
+function WeightScreen({ token, onUnauthorized }: { token: string; onUnauthorized: () => void }) {
   const [weights, setWeights] = useState<WeightEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -263,7 +337,8 @@ function WeightScreen() {
 
   const loadWeights = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/weight/`);
+      const res = await fetch(`${API_BASE_URL}/weight/`, { headers: authHeaders(token) });
+      if (res.status === 401) return onUnauthorized();
       setWeights(await res.json());
       setError(null);
     } catch (e) {
@@ -283,9 +358,10 @@ function WeightScreen() {
     try {
       const res = await fetch(`${API_BASE_URL}/weight/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(token),
         body: JSON.stringify({ weight_kg: parsed }),
       });
+      if (res.status === 401) return onUnauthorized();
       const saved = await res.json();
       setWeights((prev) => [saved, ...prev]);
       setWeightInput('');
@@ -333,7 +409,29 @@ function WeightScreen() {
 }
 
 function AppContent() {
+  const [token, setToken] = useState<string | null>(null);
+  const [checkingStoredToken, setCheckingStoredToken] = useState(true);
   const [tab, setTab] = useState<'log' | 'weight'>('log');
+
+  useEffect(() => {
+    AsyncStorage.getItem(TOKEN_KEY)
+      .then((stored) => setToken(stored))
+      .finally(() => setCheckingStoredToken(false));
+  }, []);
+
+  const handleAuthenticated = (newToken: string) => {
+    AsyncStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+  };
+
+  const handleLogout = () => {
+    AsyncStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+  };
+
+  if (checkingStoredToken) {
+    return <SafeAreaView style={styles.container} />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -341,22 +439,36 @@ function AppContent() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === 'log' && styles.tabButtonActive]}
-            onPress={() => setTab('log')}
-          >
-            <Text style={[styles.tabButtonText, tab === 'log' && styles.tabButtonTextActive]}>Food Log</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, tab === 'weight' && styles.tabButtonActive]}
-            onPress={() => setTab('weight')}
-          >
-            <Text style={[styles.tabButtonText, tab === 'weight' && styles.tabButtonTextActive]}>Weight</Text>
-          </TouchableOpacity>
-        </View>
+        {!token ? (
+          <AuthScreen onAuthenticated={handleAuthenticated} />
+        ) : (
+          <>
+            <View style={styles.tabs}>
+              <TouchableOpacity
+                style={[styles.tabButton, tab === 'log' && styles.tabButtonActive]}
+                onPress={() => setTab('log')}
+              >
+                <Text style={[styles.tabButtonText, tab === 'log' && styles.tabButtonTextActive]}>Food Log</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabButton, tab === 'weight' && styles.tabButtonActive]}
+                onPress={() => setTab('weight')}
+              >
+                <Text style={[styles.tabButtonText, tab === 'weight' && styles.tabButtonTextActive]}>Weight</Text>
+              </TouchableOpacity>
+            </View>
 
-        {tab === 'log' ? <FoodLogScreen /> : <WeightScreen />}
+            {tab === 'log' ? (
+              <FoodLogScreen token={token} onUnauthorized={handleLogout} />
+            ) : (
+              <WeightScreen token={token} onUnauthorized={handleLogout} />
+            )}
+
+            <TouchableOpacity onPress={handleLogout}>
+              <Text style={styles.link}>Log out</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <StatusBar style="auto" />
       </KeyboardAvoidingView>
@@ -380,6 +492,10 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  authContainer: {
+    flex: 1,
+    justifyContent: 'center',
   },
   tabs: {
     flexDirection: 'row',
