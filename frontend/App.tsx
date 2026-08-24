@@ -7,6 +7,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -29,7 +30,13 @@ type SearchResult = {
   fat_per_100g: number;
 };
 
-function AppContent() {
+type WeightEntry = {
+  id: number;
+  weight_kg: number;
+  recorded_at: string;
+};
+
+function FoodLogScreen() {
   const [entries, setEntries] = useState<FoodEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,106 +155,208 @@ function AppContent() {
   };
 
   return (
+    <>
+      <Text style={styles.title}>Today's Log</Text>
+      <Text style={styles.total}>{Math.round(totalCalories)} kcal</Text>
+      {error && <Text style={styles.error}>{error}</Text>}
+
+      <FlatList
+        style={styles.list}
+        data={entries}
+        keyExtractor={(item) => item.id.toString()}
+        refreshing={loading}
+        onRefresh={loadTodaysLog}
+        ListEmptyComponent={<Text style={styles.empty}>No food logged yet.</Text>}
+        renderItem={({ item }) => (
+          <TouchableOpacity style={styles.row} onLongPress={() => removeEntry(item.id)}>
+            <Text style={styles.rowName}>{item.name}</Text>
+            <Text style={styles.rowCalories}>{Math.round(item.calories)} kcal</Text>
+          </TouchableOpacity>
+        )}
+      />
+
+      {!manualMode && (
+        <>
+          <Text style={styles.sectionLabel}>Search food</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. banana"
+            value={query}
+            onChangeText={setQuery}
+            onSubmitEditing={runSearch}
+            returnKeyType="search"
+          />
+          <TouchableOpacity style={styles.button} onPress={runSearch} disabled={searching}>
+            <Text style={styles.buttonText}>{searching ? 'Searching…' : 'Search'}</Text>
+          </TouchableOpacity>
+
+          {results.length > 0 && !selected && (
+            <FlatList
+              style={styles.results}
+              data={results}
+              keyExtractor={(item, index) => `${item.name}-${index}`}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.row} onPress={() => setSelected(item)}>
+                  <Text style={styles.rowName}>{item.name}</Text>
+                  <Text style={styles.rowCalories}>{Math.round(item.calories_per_100g)} kcal/100g</Text>
+                </TouchableOpacity>
+              )}
+            />
+          )}
+
+          {selected && (
+            <>
+              <Text style={styles.sectionLabel}>
+                {selected.name} — {Math.round(selected.calories_per_100g)} kcal/100g
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Grams eaten"
+                value={grams}
+                onChangeText={setGrams}
+                keyboardType="numeric"
+              />
+              <TouchableOpacity style={styles.button} onPress={addFromSearch}>
+                <Text style={styles.buttonText}>Add to log</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          <TouchableOpacity onPress={() => setManualMode(true)}>
+            <Text style={styles.link}>Can't find it? Enter manually</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {manualMode && (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="Food name"
+            value={manualName}
+            onChangeText={setManualName}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Total calories"
+            value={manualCalories}
+            onChangeText={setManualCalories}
+            keyboardType="numeric"
+          />
+          <TouchableOpacity style={styles.button} onPress={addManually}>
+            <Text style={styles.buttonText}>Add</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setManualMode(false)}>
+            <Text style={styles.link}>Back to search</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </>
+  );
+}
+
+function WeightScreen() {
+  const [weights, setWeights] = useState<WeightEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [weightInput, setWeightInput] = useState('');
+
+  const loadWeights = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/weight/`);
+      setWeights(await res.json());
+      setError(null);
+    } catch (e) {
+      setError('Could not reach the server. Is the backend running?');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadWeights();
+  }, []);
+
+  const logWeight = async () => {
+    const parsed = parseFloat(weightInput);
+    if (Number.isNaN(parsed) || parsed <= 0) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/weight/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight_kg: parsed }),
+      });
+      const saved = await res.json();
+      setWeights((prev) => [saved, ...prev]);
+      setWeightInput('');
+      setError(null);
+    } catch (e) {
+      setError('Could not save. Is the backend running?');
+    }
+  };
+
+  const latest = weights[0];
+
+  return (
+    <>
+      <Text style={styles.title}>Weight</Text>
+      <Text style={styles.total}>{latest ? `${latest.weight_kg} kg (latest)` : 'No entries yet'}</Text>
+      {error && <Text style={styles.error}>{error}</Text>}
+
+      <FlatList
+        style={styles.list}
+        data={weights}
+        keyExtractor={(item) => item.id.toString()}
+        refreshing={loading}
+        onRefresh={loadWeights}
+        ListEmptyComponent={<Text style={styles.empty}>No weight logged yet.</Text>}
+        renderItem={({ item }) => (
+          <TouchableOpacity style={styles.row}>
+            <Text style={styles.rowName}>{item.recorded_at}</Text>
+            <Text style={styles.rowCalories}>{item.weight_kg} kg</Text>
+          </TouchableOpacity>
+        )}
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Weight (kg)"
+        value={weightInput}
+        onChangeText={setWeightInput}
+        keyboardType="numeric"
+      />
+      <TouchableOpacity style={styles.button} onPress={logWeight}>
+        <Text style={styles.buttonText}>Log weight</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
+function AppContent() {
+  const [tab, setTab] = useState<'log' | 'weight'>('log');
+
+  return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.title}>Today's Log</Text>
-        <Text style={styles.total}>{Math.round(totalCalories)} kcal</Text>
-        {error && <Text style={styles.error}>{error}</Text>}
+        <View style={styles.tabs}>
+          <TouchableOpacity
+            style={[styles.tabButton, tab === 'log' && styles.tabButtonActive]}
+            onPress={() => setTab('log')}
+          >
+            <Text style={[styles.tabButtonText, tab === 'log' && styles.tabButtonTextActive]}>Food Log</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, tab === 'weight' && styles.tabButtonActive]}
+            onPress={() => setTab('weight')}
+          >
+            <Text style={[styles.tabButtonText, tab === 'weight' && styles.tabButtonTextActive]}>Weight</Text>
+          </TouchableOpacity>
+        </View>
 
-        <FlatList
-          style={styles.list}
-          data={entries}
-          keyExtractor={(item) => item.id.toString()}
-          refreshing={loading}
-          onRefresh={loadTodaysLog}
-          ListEmptyComponent={<Text style={styles.empty}>No food logged yet.</Text>}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.row} onLongPress={() => removeEntry(item.id)}>
-              <Text style={styles.rowName}>{item.name}</Text>
-              <Text style={styles.rowCalories}>{Math.round(item.calories)} kcal</Text>
-            </TouchableOpacity>
-          )}
-        />
-
-        {!manualMode && (
-          <>
-            <Text style={styles.sectionLabel}>Search food</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. banana"
-              value={query}
-              onChangeText={setQuery}
-              onSubmitEditing={runSearch}
-              returnKeyType="search"
-            />
-            <TouchableOpacity style={styles.button} onPress={runSearch} disabled={searching}>
-              <Text style={styles.buttonText}>{searching ? 'Searching…' : 'Search'}</Text>
-            </TouchableOpacity>
-
-            {results.length > 0 && !selected && (
-              <FlatList
-                style={styles.results}
-                data={results}
-                keyExtractor={(item, index) => `${item.name}-${index}`}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.row} onPress={() => setSelected(item)}>
-                    <Text style={styles.rowName}>{item.name}</Text>
-                    <Text style={styles.rowCalories}>{Math.round(item.calories_per_100g)} kcal/100g</Text>
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-
-            {selected && (
-              <>
-                <Text style={styles.sectionLabel}>
-                  {selected.name} — {Math.round(selected.calories_per_100g)} kcal/100g
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Grams eaten"
-                  value={grams}
-                  onChangeText={setGrams}
-                  keyboardType="numeric"
-                />
-                <TouchableOpacity style={styles.button} onPress={addFromSearch}>
-                  <Text style={styles.buttonText}>Add to log</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            <TouchableOpacity onPress={() => setManualMode(true)}>
-              <Text style={styles.link}>Can't find it? Enter manually</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {manualMode && (
-          <>
-            <TextInput
-              style={styles.input}
-              placeholder="Food name"
-              value={manualName}
-              onChangeText={setManualName}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Total calories"
-              value={manualCalories}
-              onChangeText={setManualCalories}
-              keyboardType="numeric"
-            />
-            <TouchableOpacity style={styles.button} onPress={addManually}>
-              <Text style={styles.buttonText}>Add</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setManualMode(false)}>
-              <Text style={styles.link}>Back to search</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {tab === 'log' ? <FoodLogScreen /> : <WeightScreen />}
 
         <StatusBar style="auto" />
       </KeyboardAvoidingView>
@@ -271,6 +380,30 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  tabs: {
+    flexDirection: 'row',
+    marginTop: 12,
+    marginBottom: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 4,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: '#000',
+  },
+  tabButtonText: {
+    color: '#666',
+    fontWeight: '600',
+  },
+  tabButtonTextActive: {
+    color: '#fff',
   },
   title: {
     fontSize: 24,
