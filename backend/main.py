@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,13 @@ from database import Base, engine, get_db
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/foods/", response_model=schemas.FoodOut)
@@ -37,6 +45,30 @@ def create_log_entry(entry: schemas.LogEntryCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(db_entry)
     return db_entry
+
+
+@app.post("/log/quick", response_model=schemas.LogEntryOut)
+def create_quick_log_entry(entry: schemas.QuickLogCreate, db: Session = Depends(get_db)):
+    """Log food by name + total calories, without tracking per-100g/grams separately."""
+    db_food = models.Food(name=entry.name, calories_per_100g=entry.calories)
+    db.add(db_food)
+    db.commit()
+    db.refresh(db_food)
+
+    db_entry = models.LogEntry(food_id=db_food.id, grams=100)
+    db.add(db_entry)
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry
+
+
+@app.delete("/log/{entry_id}", status_code=204)
+def delete_log_entry(entry_id: int, db: Session = Depends(get_db)):
+    db_entry = db.query(models.LogEntry).filter(models.LogEntry.id == entry_id).first()
+    if not db_entry:
+        raise HTTPException(status_code=404, detail="Log entry not found")
+    db.delete(db_entry)
+    db.commit()
 
 
 @app.get("/log/today", response_model=list[schemas.LogEntryOut])

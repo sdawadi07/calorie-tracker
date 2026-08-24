@@ -27,6 +27,11 @@ class LogEntryCreate(BaseModel):
     grams: float
 
 
+class QuickLogCreate(BaseModel):
+    name: str
+    calories: float
+
+
 class LogEntryOut(BaseModel):
     id: int
     food_id: int
