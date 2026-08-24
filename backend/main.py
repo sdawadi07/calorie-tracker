@@ -28,11 +28,16 @@ app.add_middleware(
 
 
 @app.post("/auth/signup", response_model=schemas.TokenOut)
-def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def signup(user: schemas.UserSignup, db: Session = Depends(get_db)):
     existing = db.query(models.User).filter(models.User.email == user.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    db_user = models.User(email=user.email, hashed_password=auth.hash_password(user.password))
+    db_user = models.User(
+        first_name=user.first_name,
+        last_name=user.last_name,
+        email=user.email,
+        hashed_password=auth.hash_password(user.password),
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -40,7 +45,7 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=schemas.TokenOut)
-def login(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if not db_user or not auth.verify_password(user.password, db_user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")

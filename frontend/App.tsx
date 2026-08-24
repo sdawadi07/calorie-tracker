@@ -45,20 +45,65 @@ type WeightEntry = {
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const submit = async () => {
+  const switchMode = (next: 'login' | 'signup') => {
+    setMode(next);
+    setError(null);
+  };
+
+  const submitLogin = async () => {
     if (!email.trim() || !password) return;
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/${mode}`, {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body?.detail || 'Something went wrong.');
+        return;
+      }
+      onAuthenticated(body.access_token);
+    } catch (e) {
+      setError('Could not reach the server. Is the backend running?');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitSignup = async () => {
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !password) return;
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!agreed) {
+      setError('You must agree to the Terms & Conditions to create an account.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          email: email.trim(),
+          password,
+        }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -77,6 +122,24 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => v
     <View style={styles.authContainer}>
       <Text style={styles.title}>{mode === 'login' ? 'Log in' : 'Sign up'}</Text>
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {mode === 'signup' && (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="First name"
+            value={firstName}
+            onChangeText={setFirstName}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Last name"
+            value={lastName}
+            onChangeText={setLastName}
+          />
+        </>
+      )}
+
       <TextInput
         style={styles.input}
         placeholder="Email"
@@ -92,12 +155,35 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => v
         onChangeText={setPassword}
         secureTextEntry
       />
-      <TouchableOpacity style={styles.button} onPress={submit} disabled={submitting}>
+
+      {mode === 'signup' && (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="Confirm password"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+          />
+          <TouchableOpacity style={styles.checkboxRow} onPress={() => setAgreed(!agreed)}>
+            <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
+              {agreed && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.checkboxLabel}>I agree to the Terms & Conditions</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      <TouchableOpacity
+        style={styles.button}
+        onPress={mode === 'login' ? submitLogin : submitSignup}
+        disabled={submitting}
+      >
         <Text style={styles.buttonText}>
-          {submitting ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Sign up'}
+          {submitting ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+      <TouchableOpacity onPress={() => switchMode(mode === 'login' ? 'signup' : 'login')}>
         <Text style={styles.link}>
           {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
         </Text>
@@ -496,6 +582,34 @@ const styles = StyleSheet.create({
   authContainer: {
     flex: 1,
     justifyContent: 'center',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#000',
+    borderColor: '#000',
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 14,
+  },
+  checkboxLabel: {
+    color: '#444',
+    fontSize: 14,
   },
   tabs: {
     flexDirection: 'row',

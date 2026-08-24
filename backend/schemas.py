@@ -3,7 +3,14 @@ from datetime import date, datetime
 from pydantic import BaseModel, EmailStr
 
 
-class UserCreate(BaseModel):
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserSignup(BaseModel):
+    first_name: str
+    last_name: str
     email: EmailStr
     password: str
 
