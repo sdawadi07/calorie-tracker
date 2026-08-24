@@ -32,6 +32,23 @@ class QuickLogCreate(BaseModel):
     calories: float
 
 
+class USDAFoodResult(BaseModel):
+    name: str
+    calories_per_100g: float
+    protein_per_100g: float
+    carbs_per_100g: float
+    fat_per_100g: float
+
+
+class LogFromSearchCreate(BaseModel):
+    name: str
+    calories_per_100g: float
+    protein_per_100g: float = 0
+    carbs_per_100g: float = 0
+    fat_per_100g: float = 0
+    grams: float
+
+
 class LogEntryOut(BaseModel):
     id: int
     food_id: int

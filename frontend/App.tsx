@@ -21,12 +21,28 @@ type FoodEntry = {
   calories: number;
 };
 
+type SearchResult = {
+  name: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+};
+
 function AppContent() {
   const [entries, setEntries] = useState<FoodEntry[]>([]);
-  const [name, setName] = useState('');
-  const [calories, setCalories] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [selected, setSelected] = useState<SearchResult | null>(null);
+  const [grams, setGrams] = useState('100');
+
+  const [manualMode, setManualMode] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualCalories, setManualCalories] = useState('');
 
   const totalCalories = entries.reduce((sum, entry) => sum + entry.calories, 0);
 
@@ -53,24 +69,69 @@ function AppContent() {
     loadTodaysLog();
   }, []);
 
-  const addEntry = async () => {
-    const parsedCalories = parseInt(calories, 10);
-    if (!name.trim() || Number.isNaN(parsedCalories)) {
-      return;
+  const runSearch = async () => {
+    if (!query.trim()) return;
+    setSearching(true);
+    setSelected(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/foods/search?q=${encodeURIComponent(query.trim())}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.detail || 'Food search failed.');
+        setResults([]);
+        return;
+      }
+      setResults(await res.json());
+      setError(null);
+    } catch (e) {
+      setError('Could not reach the server. Is the backend running?');
+    } finally {
+      setSearching(false);
     }
+  };
+
+  const addFromSearch = async () => {
+    if (!selected) return;
+    const parsedGrams = parseFloat(grams);
+    if (Number.isNaN(parsedGrams) || parsedGrams <= 0) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/log/from_search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...selected, grams: parsedGrams }),
+      });
+      const saved = await res.json();
+      setEntries((prev) => [
+        ...prev,
+        { id: saved.id, name: saved.food.name, calories: (saved.food.calories_per_100g * saved.grams) / 100 },
+      ]);
+      setSelected(null);
+      setResults([]);
+      setQuery('');
+      setGrams('100');
+      setError(null);
+    } catch (e) {
+      setError('Could not save. Is the backend running?');
+    }
+  };
+
+  const addManually = async () => {
+    const parsedCalories = parseInt(manualCalories, 10);
+    if (!manualName.trim() || Number.isNaN(parsedCalories)) return;
     try {
       const res = await fetch(`${API_BASE_URL}/log/quick`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), calories: parsedCalories }),
+        body: JSON.stringify({ name: manualName.trim(), calories: parsedCalories }),
       });
       const saved = await res.json();
       setEntries((prev) => [
         ...prev,
         { id: saved.id, name: saved.food.name, calories: saved.food.calories_per_100g },
       ]);
-      setName('');
-      setCalories('');
+      setManualName('');
+      setManualCalories('');
+      setManualMode(false);
       setError(null);
     } catch (e) {
       setError('Could not save. Is the backend running?');
@@ -93,7 +154,7 @@ function AppContent() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <Text style={styles.title}>Today's Log</Text>
-        <Text style={styles.total}>{totalCalories} kcal</Text>
+        <Text style={styles.total}>{Math.round(totalCalories)} kcal</Text>
         {error && <Text style={styles.error}>{error}</Text>}
 
         <FlatList
@@ -106,27 +167,87 @@ function AppContent() {
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.row} onLongPress={() => removeEntry(item.id)}>
               <Text style={styles.rowName}>{item.name}</Text>
-              <Text style={styles.rowCalories}>{item.calories} kcal</Text>
+              <Text style={styles.rowCalories}>{Math.round(item.calories)} kcal</Text>
             </TouchableOpacity>
           )}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Food name"
-          value={name}
-          onChangeText={setName}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Calories"
-          value={calories}
-          onChangeText={setCalories}
-          keyboardType="numeric"
-        />
-        <TouchableOpacity style={styles.button} onPress={addEntry}>
-          <Text style={styles.buttonText}>Add</Text>
-        </TouchableOpacity>
+        {!manualMode && (
+          <>
+            <Text style={styles.sectionLabel}>Search food</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. banana"
+              value={query}
+              onChangeText={setQuery}
+              onSubmitEditing={runSearch}
+              returnKeyType="search"
+            />
+            <TouchableOpacity style={styles.button} onPress={runSearch} disabled={searching}>
+              <Text style={styles.buttonText}>{searching ? 'Searching…' : 'Search'}</Text>
+            </TouchableOpacity>
+
+            {results.length > 0 && !selected && (
+              <FlatList
+                style={styles.results}
+                data={results}
+                keyExtractor={(item, index) => `${item.name}-${index}`}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.row} onPress={() => setSelected(item)}>
+                    <Text style={styles.rowName}>{item.name}</Text>
+                    <Text style={styles.rowCalories}>{Math.round(item.calories_per_100g)} kcal/100g</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+
+            {selected && (
+              <>
+                <Text style={styles.sectionLabel}>
+                  {selected.name} — {Math.round(selected.calories_per_100g)} kcal/100g
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Grams eaten"
+                  value={grams}
+                  onChangeText={setGrams}
+                  keyboardType="numeric"
+                />
+                <TouchableOpacity style={styles.button} onPress={addFromSearch}>
+                  <Text style={styles.buttonText}>Add to log</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity onPress={() => setManualMode(true)}>
+              <Text style={styles.link}>Can't find it? Enter manually</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {manualMode && (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Food name"
+              value={manualName}
+              onChangeText={setManualName}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Total calories"
+              value={manualCalories}
+              onChangeText={setManualCalories}
+              keyboardType="numeric"
+            />
+            <TouchableOpacity style={styles.button} onPress={addManually}>
+              <Text style={styles.buttonText}>Add</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setManualMode(false)}>
+              <Text style={styles.link}>Back to search</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <StatusBar style="auto" />
       </KeyboardAvoidingView>
@@ -168,6 +289,10 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
+  results: {
+    maxHeight: 200,
+    marginBottom: 8,
+  },
   empty: {
     color: '#999',
     marginTop: 20,
@@ -182,10 +307,18 @@ const styles = StyleSheet.create({
   },
   rowName: {
     fontSize: 16,
+    flexShrink: 1,
+    paddingRight: 8,
   },
   rowCalories: {
     fontSize: 16,
     color: '#666',
+  },
+  sectionLabel: {
+    fontSize: 14,
+    color: '#444',
+    fontWeight: '600',
+    marginBottom: 6,
   },
   input: {
     borderWidth: 1,
@@ -200,10 +333,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   buttonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  link: {
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+    textDecorationLine: 'underline',
   },
 });

@@ -1,5 +1,8 @@
+import os
 from datetime import datetime
 
+import requests
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
@@ -8,6 +11,8 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import Base, engine, get_db
+
+load_dotenv()
 
 Base.metadata.create_all(bind=engine)
 
@@ -19,6 +24,59 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# DEMO_KEY works out of the box but is rate-limited (30 req/hour, 50/day).
+# Get a free personal key at https://api.data.gov/signup/ and set USDA_API_KEY
+# as an environment variable if you hit the limit.
+USDA_API_KEY = os.environ.get("USDA_API_KEY", "DEMO_KEY")
+USDA_SEARCH_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
+
+NUTRIENT_NAME_MAP = {
+    "Energy": "calories_per_100g",
+    "Protein": "protein_per_100g",
+    "Carbohydrate, by difference": "carbs_per_100g",
+    "Total lipid (fat)": "fat_per_100g",
+}
+
+
+@app.get("/foods/search", response_model=list[schemas.USDAFoodResult])
+def search_usda_foods(q: str):
+    # USDA's API is occasionally flaky (intermittent 404s on valid requests),
+    # so retry a couple times before giving up. Rate limiting (429) won't be
+    # fixed by retrying, so fail fast on that one.
+    resp = None
+    for _ in range(3):
+        resp = requests.get(
+            USDA_SEARCH_URL,
+            params={"query": q, "api_key": USDA_API_KEY, "pageSize": 15},
+            timeout=10,
+        )
+        if resp.status_code == 200 or resp.status_code == 429:
+            break
+
+    if resp is not None and resp.status_code == 429:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "USDA API rate limit reached. Get a free personal key at "
+                "https://api.data.gov/signup/ and set it as the USDA_API_KEY "
+                "environment variable."
+            ),
+        )
+    if resp is None or resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="USDA food lookup failed")
+
+    results = []
+    for item in resp.json().get("foods", []):
+        values = {"calories_per_100g": None, "protein_per_100g": 0, "carbs_per_100g": 0, "fat_per_100g": 0}
+        for nutrient in item.get("foodNutrients", []):
+            field = NUTRIENT_NAME_MAP.get(nutrient.get("nutrientName"))
+            if field:
+                values[field] = nutrient.get("value", 0)
+        if values["calories_per_100g"] is None:
+            continue
+        results.append({"name": item["description"], **values})
+    return results
 
 
 @app.post("/foods/", response_model=schemas.FoodOut)
@@ -56,6 +114,26 @@ def create_quick_log_entry(entry: schemas.QuickLogCreate, db: Session = Depends(
     db.refresh(db_food)
 
     db_entry = models.LogEntry(food_id=db_food.id, grams=100)
+    db.add(db_entry)
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry
+
+
+@app.post("/log/from_search", response_model=schemas.LogEntryOut)
+def create_log_entry_from_search(entry: schemas.LogFromSearchCreate, db: Session = Depends(get_db)):
+    db_food = models.Food(
+        name=entry.name,
+        calories_per_100g=entry.calories_per_100g,
+        protein_per_100g=entry.protein_per_100g,
+        carbs_per_100g=entry.carbs_per_100g,
+        fat_per_100g=entry.fat_per_100g,
+    )
+    db.add(db_food)
+    db.commit()
+    db.refresh(db_food)
+
+    db_entry = models.LogEntry(food_id=db_food.id, grams=entry.grams)
     db.add(db_entry)
     db.commit()
     db.refresh(db_entry)
