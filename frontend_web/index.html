@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Calorie Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===================== AUTH VIEW ===================== -->
+  <section id="auth-view" class="view">
+    <div class="auth-shell">
+      <div class="brand">
+        <p class="brand-kicker">CALORIE TRACKER</p>
+        <h1 class="brand-title">Calorie Deficit</h1>
+        <p class="brand-sub">A simple, accurate way to see exactly where your calories go.</p>
+      </div>
+
+      <div class="card auth-card">
+        <div class="tab-row" role="tablist">
+          <button type="button" class="tab-btn active" data-mode="login">Log in</button>
+          <button type="button" class="tab-btn" data-mode="signup">Sign up</button>
+        </div>
+
+        <p id="auth-error" class="error hidden"></p>
+
+        <form id="login-form" class="form">
+          <input type="email" id="login-email" placeholder="Email" autocomplete="email" required />
+          <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required />
+          <button type="submit" class="btn btn-primary" id="login-submit">Log in</button>
+        </form>
+
+        <form id="signup-form" class="form hidden">
+          <div class="row-2">
+            <input type="text" id="signup-first" placeholder="First name" autocomplete="given-name" required />
+            <input type="text" id="signup-last" placeholder="Last name" autocomplete="family-name" required />
+          </div>
+          <input type="email" id="signup-email" placeholder="Email" autocomplete="email" required />
+          <input type="password" id="signup-password" placeholder="Password (min 8 characters)" autocomplete="new-password" required minlength="8" />
+          <button type="submit" class="btn btn-primary" id="signup-submit">Create account</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== APP VIEW ===================== -->
+  <section id="app-view" class="view hidden">
+    <header class="topbar">
+      <span class="topbar-title">Calorie Tracker</span>
+      <button type="button" id="logout-btn" class="link-btn">Log out</button>
+    </header>
+
+    <main class="app-main">
+      <p id="app-error" class="error hidden"></p>
+
+      <!-- Daily goal / summary card -->
+      <div class="card summary-card">
+        <div class="summary-head">
+          <span class="label">Daily Budget</span>
+          <button type="button" id="edit-goal-btn" class="link-btn">Edit</button>
+        </div>
+
+        <div id="goal-display">
+          <p class="big-number"><span id="calories-consumed">0</span> / <span id="calories-goal">0</span> kcal</p>
+          <div class="progress-track">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <p id="remaining-text" class="remaining-text">0 kcal remaining</p>
+        </div>
+
+        <form id="goal-form" class="form hidden">
+          <div class="row-2">
+            <input type="number" id="goal-input" placeholder="2000" min="1" max="20000" required />
+            <button type="submit" class="btn btn-primary btn-compact">Save</button>
+          </div>
+          <button type="button" id="cancel-goal-btn" class="link-btn">Cancel</button>
+        </form>
+      </div>
+
+      <!-- Add food card -->
+      <div class="card">
+        <h2 class="section-title">Log Food</h2>
+        <form id="food-form" class="form">
+          <input type="text" id="food-name" placeholder="Food name (e.g. Chicken breast)" required />
+          <div class="row-2">
+            <input type="number" id="food-weight" placeholder="Weight (g)" min="0.1" max="10000" step="any" required />
+            <input type="number" id="food-density" placeholder="Calories per 100g" min="0" step="any" required />
+          </div>
+          <p class="preview-text">Total: <strong id="food-preview">0</strong> kcal</p>
+          <button type="submit" class="btn btn-primary" id="food-submit">Add Food</button>
+        </form>
+      </div>
+
+      <!-- Today's log -->
+      <div class="card">
+        <h2 class="section-title">Today's Food</h2>
+        <ul id="food-list" class="entry-list"></ul>
+        <p id="food-empty" class="empty-text hidden">No food logged yet.</p>
+      </div>
+    </main>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
