@@ -13,6 +13,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    daily_calorie_goal = Column(Integer, nullable=False, default=2000, server_default="2000")
 
 
 class Food(Base):
@@ -24,6 +25,7 @@ class Food(Base):
     protein_per_100g = Column(Float, default=0)
     carbs_per_100g = Column(Float, default=0)
     fat_per_100g = Column(Float, default=0)
+    fdc_id = Column(Integer, nullable=True)
 
     log_entries = relationship("LogEntry", back_populates="food")
 
@@ -35,6 +37,9 @@ class LogEntry(Base):
     food_id = Column(Integer, ForeignKey("foods.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     grams = Column(Float, nullable=False)
+    # Snapshot of calories at log time, so edits to a shared Food row (or
+    # future recalculation logic) never silently rewrite past history.
+    calculated_calories = Column(Float, nullable=True)
     logged_at = Column(DateTime, default=datetime.utcnow)
 
     food = relationship("Food", back_populates="log_entries")
